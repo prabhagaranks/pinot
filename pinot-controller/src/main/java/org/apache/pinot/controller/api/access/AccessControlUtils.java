@@ -1,0 +1,105 @@
+/**
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+package org.apache.pinot.controller.api.access;
+
+import javax.annotation.Nullable;
+import javax.ws.rs.core.HttpHeaders;
+import javax.ws.rs.core.Response;
+import org.apache.commons.lang3.StringUtils;
+import org.apache.pinot.controller.api.exception.ControllerApplicationException;
+import org.apache.pinot.spi.utils.builder.TableNameBuilder;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
+/**
+ * Utility class to simplify access control validation. This class is simple wrapper around AccessControl class.
+ */
+public final class AccessControlUtils {
+  private AccessControlUtils() {
+    // left blank
+  }
+
+  private static final Logger LOGGER = LoggerFactory.getLogger(AccessControlUtils.class);
+
+  /**
+   * Validate permission for the given access type against the given table
+   *
+   * @param tableName name of the table to be accessed
+   * @param accessType type of the access
+   * @param httpHeaders HTTP headers containing requester identity required by access control object
+   * @param endpointUrl the request url for which this access control is called
+   * @param accessControl AccessControl object which does the actual validation
+   */
+  public static void validatePermission(@Nullable String tableName, AccessType accessType,
+      @Nullable HttpHeaders httpHeaders, @Nullable String endpointUrl, AccessControl accessControl) {
+    String message = null;
+    try {
+      if (StringUtils.isBlank(tableName)) {
+        message = String.format("%s '%s'", accessType, endpointUrl);
+        if (!accessControl.hasAccess(accessType, httpHeaders, endpointUrl)) {
+          accessDenied(message);
+        }
+      } else {
+        message = String.format("%s '%s' for table '%s'", accessType, endpointUrl, tableName);
+        String rawTableName = TableNameBuilder.extractRawTableName(tableName);
+        if (!accessControl.hasAccess(rawTableName, accessType, httpHeaders, endpointUrl)) {
+          accessDenied(message);
+        }
+      }
+    } catch (ControllerApplicationException e) {
+      throw e;
+    } catch (Exception e) {
+      throw new ControllerApplicationException(LOGGER, "Caught exception while validating permission for " + message,
+          Response.Status.INTERNAL_SERVER_ERROR, e);
+    }
+  }
+
+  /**
+   * Validate permission for the given access type for a non-table level endpoint
+   *
+   * @param accessType type of the access
+   * @param httpHeaders HTTP headers containing requester identity required by access control object
+   * @param endpointUrl the request url for which this access control is called
+   * @param accessControl AccessControl object which does the actual validation
+   */
+  public static void validatePermission(AccessType accessType, @Nullable HttpHeaders httpHeaders,
+      @Nullable String endpointUrl, AccessControl accessControl) {
+    validatePermission(null, accessType, httpHeaders, endpointUrl, accessControl);
+  }
+
+  /**
+   * Validate permission for the given access type and endpointUrl
+   *
+   * @param httpHeaders HTTP headers containing requester identity required by access control object
+   * @param endpointUrl the request url for which this access control is called
+   */
+  public static void validatePermission(@Nullable HttpHeaders httpHeaders, @Nullable String endpointUrl,
+      AccessControl accessControl) {
+    if (!accessControl.hasAccess(httpHeaders)) {
+      accessDenied(endpointUrl);
+    }
+  }
+
+  private static void accessDenied(String resource) {
+    throw new ControllerApplicationException(LOGGER, "Permission is denied for " + resource,
+        Response.Status.FORBIDDEN);
+  }
+}
